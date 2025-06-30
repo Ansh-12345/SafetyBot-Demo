@@ -128,12 +128,18 @@ After your main reply, think of 3 very relevant follow-up questions the user mig
     if (!raw) throw new Error("No response from Gemini");
 
     let parsed = { reply: raw, followUps: [] };
-    try {
-      const match = raw.match(/{[\s\S]*?}/);
-      if (match) parsed = JSON.parse(match[0]);
-    } catch {
-      console.warn("⚠️ JSON parsing failed, using raw fallback");
-    }
+
+try {
+  const match = raw.match(/{[\s\S]+?"followUps"\s*:\s*\[[\s\S]*?\]}/);
+  if (match) {
+    const json = JSON.parse(match[0]);
+    parsed.reply = json.reply || raw;
+    parsed.followUps = Array.isArray(json.followUps) ? json.followUps : [];
+  }
+} catch (err) {
+  console.warn("⚠️ JSON parsing failed. Using raw text only.", err.message);
+}
+
 
     if (!parsed.reply) parsed.reply = raw;
     if (!Array.isArray(parsed.followUps)) parsed.followUps = [];
