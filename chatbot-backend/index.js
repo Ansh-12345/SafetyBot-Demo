@@ -153,3 +153,8 @@ After your main reply, think of 3 very relevant follow-up questions the user mig
 
 // Export the app (for Vercel or other platforms)
 module.exports = app;
+
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`🚀 Server is running on port ${PORT}`);
+});
