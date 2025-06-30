@@ -130,15 +130,23 @@ After your main reply, think of 3 very relevant follow-up questions the user mig
     let parsed = { reply: raw, followUps: [] };
 
     try {
+      // Extract the JSON part
       const match = raw.match(/{[\s\S]+?"followUps"\s*:\s*\[[\s\S]*?\]}/);
       if (match) {
         const json = JSON.parse(match[0]);
         parsed.reply = json.reply || raw;
         parsed.followUps = Array.isArray(json.followUps) ? json.followUps : [];
+
+        // Optional: remove the JSON from the raw text if needed
+        const cleanedText = raw.replace(match[0], '').trim();
+        if (!parsed.reply.includes(cleanedText)) {
+          parsed.reply = cleanedText || parsed.reply;
+        }
       }
     } catch (err) {
       console.warn("⚠️ JSON parsing failed. Using raw text only.", err.message);
     }
+
 
     userHistories[userId].push({ role: "model", parts: [{ text: parsed.reply }] });
 
