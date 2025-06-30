@@ -69,7 +69,7 @@ app.post('/api/chat', async (req, res) => {
   if (!message) return res.status(400).json({ error: 'Message is required' });
 
   try {
-    // Static match
+    // Static keyword match
     for (const resource of staticResources) {
       if (resource.keywords.test(message)) {
         userHistories[userId] = userHistories[userId] || [];
@@ -129,20 +129,16 @@ After your main reply, think of 3 very relevant follow-up questions the user mig
 
     let parsed = { reply: raw, followUps: [] };
 
-try {
-  const match = raw.match(/{[\s\S]+?"followUps"\s*:\s*\[[\s\S]*?\]}/);
-  if (match) {
-    const json = JSON.parse(match[0]);
-    parsed.reply = json.reply || raw;
-    parsed.followUps = Array.isArray(json.followUps) ? json.followUps : [];
-  }
-} catch (err) {
-  console.warn("⚠️ JSON parsing failed. Using raw text only.", err.message);
-}
-
-
-    if (!parsed.reply) parsed.reply = raw;
-    if (!Array.isArray(parsed.followUps)) parsed.followUps = [];
+    try {
+      const match = raw.match(/{[\s\S]+?"followUps"\s*:\s*\[[\s\S]*?\]}/);
+      if (match) {
+        const json = JSON.parse(match[0]);
+        parsed.reply = json.reply || raw;
+        parsed.followUps = Array.isArray(json.followUps) ? json.followUps : [];
+      }
+    } catch (err) {
+      console.warn("⚠️ JSON parsing failed. Using raw text only.", err.message);
+    }
 
     userHistories[userId].push({ role: "model", parts: [{ text: parsed.reply }] });
 
@@ -157,9 +153,7 @@ try {
   }
 });
 
-// Export the app (for Vercel or other platforms)
-module.exports = app;
-
+// For Render deployment
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
