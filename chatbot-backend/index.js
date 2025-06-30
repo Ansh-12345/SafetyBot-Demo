@@ -15,10 +15,10 @@ if (!API_KEY) {
   process.exit(1);
 }
 
-// In-memory history store
-const userHistories = {}; // { userId: [ { role, parts } ] }
+// In-memory user message history
+const userHistories = {};
 
-// Static PDFs with updated links
+// Static safety resource responses
 const staticResources = [
   {
     keywords: /fire\s?(evacuation|plan|safety)/i,
@@ -71,23 +71,22 @@ app.post('/api/chat', async (req, res) => {
   if (!message) return res.status(400).json({ error: 'Message is required' });
 
   try {
-    // 1. Check static resources
+    // Check for static resources first
     for (const resource of staticResources) {
       if (resource.keywords.test(message)) {
         console.log("✅ Static match:", resource.linkText);
-
         userHistories[userId] = userHistories[userId] || [];
         userHistories[userId].push({ role: "user", parts: [{ text: message }] });
         userHistories[userId].push({ role: "model", parts: [{ text: resource.reply }] });
 
         return res.json({
           reply: `${resource.reply}\n\n[${resource.linkText}](${resource.linkUrl})`,
-          followUps: resource.followUps || []
+          followUps: resource.followUps
         });
       }
     }
 
-    // 2. Store user message
+    // Append user input to history
     userHistories[userId] = userHistories[userId] || [];
     userHistories[userId].push({ role: "user", parts: [{ text: message }] });
 
@@ -130,22 +129,32 @@ After your main reply, think of 3 very relevant follow-up questions the user mig
 
     const geminiRes = await axios.post(url, body);
     const raw = geminiRes.data.candidates?.[0]?.content?.parts?.[0]?.text;
-
     if (!raw) throw new Error("No response from Gemini");
 
-    const match = raw.match(/{[\s\S]*}/);
-    const parsed = match ? JSON.parse(match[0]) : { reply: raw, followUps: [] };
+    // Extract and parse JSON block if present
+    let parsed = { reply: raw, followUps: [] };
+    try {
+      const match = raw.match(/{[\s\S]*?}/);
+      if (match) parsed = JSON.parse(match[0]);
+    } catch (err) {
+      console.warn("⚠️ Failed to parse follow-ups, falling back to plain text.");
+    }
 
-    userHistories[userId].push({ role: "model", parts: [{ text: parsed.reply || raw }] });
+    // Final fallback in case parsing fails
+    if (!parsed.reply) parsed.reply = raw;
+    if (!Array.isArray(parsed.followUps)) parsed.followUps = [];
 
-    console.log("✅ Gemini Reply:", parsed.reply);
+    userHistories[userId].push({ role: "model", parts: [{ text: parsed.reply }] });
+
+    console.log("✅ Reply:", parsed.reply);
     return res.json({
-      reply: parsed.reply || raw,
-      followUps: Array.isArray(parsed.followUps) ? parsed.followUps : []
+      reply: parsed.reply,
+      followUps: parsed.followUps
     });
+
   } catch (err) {
     console.error("❌ Gemini API error:", err.response?.data || err.message);
-    res.status(500).json({ error: "Gemini backend error." });
+    return res.status(500).json({ error: "Gemini backend error." });
   }
 });
 

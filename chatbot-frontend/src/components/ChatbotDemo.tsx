@@ -3,13 +3,11 @@ import { Send, Bot, User, PhoneCall, MapPin } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-// Define message type
 type Message = {
   id: number;
   sender: 'user' | 'bot';
   text: string;
   timestamp: Date;
-  isFollowUp?: boolean;
   isTyping?: boolean;
 };
 
@@ -22,23 +20,24 @@ const ChatbotDemo = () => {
   }]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [typingMessage, setTypingMessage] = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [emergencyMode, setEmergencyMode] = useState(false);
-  const [typingMessage, setTypingMessage] = useState<string>('');
   const [safetyMode, setSafetyMode] = useState<'home' | 'workplace' | 'child' | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, suggestions]);
 
   useEffect(() => {
-    let timeout: NodeJS.Timeout;
+    let interval: NodeJS.Timeout;
     if (typingMessage) {
       let i = 0;
-      timeout = setInterval(() => {
+      interval = setInterval(() => {
         setMessages((prev) => {
           const last = prev[prev.length - 1];
-          if (last.isTyping) {
+          if (last?.isTyping) {
             const updated = [...prev];
             updated[updated.length - 1] = {
               ...last,
@@ -49,37 +48,35 @@ const ChatbotDemo = () => {
           return prev;
         });
         i++;
-        if (i >= typingMessage.length) {
-          clearInterval(timeout);
-        }
+        if (i >= typingMessage.length) clearInterval(interval);
       }, 20);
     }
-    return () => clearInterval(timeout);
+    return () => clearInterval(interval);
   }, [typingMessage]);
 
-  const handleSendMessage = async (messageText: string) => {
-    if (!messageText.trim()) return;
-
+  const handleSendMessage = async (text: string) => {
+    if (!text.trim()) return;
     const userMessage: Message = {
       id: messages.length + 1,
       sender: 'user',
-      text: messageText,
+      text,
       timestamp: new Date()
     };
-
     setMessages((prev) => [...prev, userMessage]);
-    setIsLoading(true);
     setInputText('');
+    setIsLoading(true);
+    setSuggestions([]);
 
     try {
       const response = await fetch('http://localhost:3000/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: messageText, mode: safetyMode })
+        body: JSON.stringify({ message: text, mode: safetyMode })
       });
 
       const data = await response.json();
-      const fullBotReply = data.reply || 'Sorry, I couldn’t understand that.';
+      const replyText = data.reply || 'Sorry, I couldn’t understand that.';
+      const followUps: string[] = Array.isArray(data.followUps) ? data.followUps : [];
 
       const typingPlaceholder: Message = {
         id: messages.length + 2,
@@ -88,48 +85,29 @@ const ChatbotDemo = () => {
         timestamp: new Date(),
         isTyping: true
       };
+
       setMessages((prev) => [...prev, typingPlaceholder]);
-      setTypingMessage(fullBotReply);
+      setTypingMessage(replyText);
 
       setTimeout(() => {
         setMessages((prev) =>
-          prev.map((m) =>
-            m.isTyping ? { ...m, text: fullBotReply, isTyping: false } : m
+          prev.map((msg) =>
+            msg.isTyping ? { ...msg, text: replyText, isTyping: false } : msg
           )
         );
-      }, fullBotReply.length * 20 + 200);
-
-      const followUps = Array.isArray(data.followUps)
-        ? data.followUps.map((text: string, i: number): Message => ({
-            id: messages.length + 3 + i,
-            sender: 'bot',
-            text,
-            isFollowUp: true,
-            timestamp: new Date()
-          }))
-        : [];
-
-      setTimeout(() => {
-        setMessages((prev) => [...prev, ...followUps]);
+        setSuggestions(followUps);
         setIsLoading(false);
-      }, fullBotReply.length * 20 + 400);
-    } catch (error) {
-      console.error('API error:', error);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: messages.length + 2,
-          sender: 'bot',
-          text: '⚠️ Something went wrong. Please try again later.',
-          timestamp: new Date()
-        }
-      ]);
+      }, replyText.length * 20 + 300);
+    } catch (err) {
+      console.error('Error:', err);
+      setMessages((prev) => [...prev, {
+        id: messages.length + 2,
+        sender: 'bot',
+        text: '⚠️ Something went wrong. Please try again later.',
+        timestamp: new Date()
+      }]);
       setIsLoading(false);
     }
-  };
-
-  const sendQuickMessage = (text: string) => {
-    handleSendMessage(text);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -139,9 +117,7 @@ const ChatbotDemo = () => {
   const handleShareLocation = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          alert(`📍 Location:\nLatitude: ${pos.coords.latitude}\nLongitude: ${pos.coords.longitude}`);
-        },
+        (pos) => alert(`📍 Latitude: ${pos.coords.latitude}, Longitude: ${pos.coords.longitude}`),
         () => alert('❌ Location permission denied.')
       );
     } else {
@@ -155,6 +131,10 @@ const ChatbotDemo = () => {
     'Natural disaster guidance',
     'Emergency contacts'
   ];
+
+  const sendQuickMessage = (text: string) => {
+    handleSendMessage(text);
+  };
 
   if (emergencyMode) {
     return (
@@ -194,32 +174,34 @@ const ChatbotDemo = () => {
   return (
     <section className="py-20 bg-gray-50" id="demo">
       <div className="max-w-4xl mx-auto px-4">
-        <div className="text-center mb-8">
-          <h2 className="text-3xl font-bold text-gray-900 mb-2">Try SafetyBot Demo</h2>
-          <p className="text-gray-600">Ask me public safety questions about your city.</p>
+        <div className="text-center mb-6">
+          <h2 className="text-3xl font-bold text-gray-900">Try SafetyBot Demo</h2>
+          <p className="text-gray-600">Ask about public safety in Indianapolis</p>
         </div>
 
         <div className="mb-4 text-center space-x-2">
           <button onClick={() => setEmergencyMode(true)} className="bg-red-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-red-700">
-            🚨 I'm in an Emergency
+            🚨 Emergency
           </button>
-          <button onClick={() => setSafetyMode('home')} className={`px-4 py-2 rounded-lg font-semibold ${safetyMode === 'home' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
-            🏠 Home Safety
-          </button>
-          <button onClick={() => setSafetyMode('workplace')} className={`px-4 py-2 rounded-lg font-semibold ${safetyMode === 'workplace' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
-            🏢 Workplace
-          </button>
-          <button onClick={() => setSafetyMode('child')} className={`px-4 py-2 rounded-lg font-semibold ${safetyMode === 'child' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
-            🚸 Child Safety
-          </button>
+          {['home', 'workplace', 'child'].map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setSafetyMode(mode as any)}
+              className={`px-4 py-2 rounded-lg font-semibold ${safetyMode === mode ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              {mode === 'home' && '🏠 Home'}
+              {mode === 'workplace' && '🏢 Workplace'}
+              {mode === 'child' && '🚸 Child Safety'}
+            </button>
+          ))}
         </div>
 
         <div className="bg-white shadow-lg rounded-xl overflow-hidden">
-          <div className="bg-blue-600 text-white p-5 flex items-center gap-3">
-            <Bot className="w-6 h-6" />
+          <div className="bg-blue-600 text-white p-4 flex items-center gap-2">
+            <Bot className="w-5 h-5" />
             <div>
               <h3 className="font-semibold">SafetyBot</h3>
-              <p className="text-xs text-blue-200">Online</p>
+              <p className="text-xs text-blue-200">Public Safety AI</p>
             </div>
           </div>
 
@@ -231,20 +213,9 @@ const ChatbotDemo = () => {
                     {m.sender === 'user' ? <User className="h-4 w-4 text-white" /> : <Bot className="h-4 w-4 text-gray-600" />}
                   </div>
                   <div className={`p-3 rounded-lg ${m.sender === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'}`}>
-                    <div className="prose prose-sm mb-1">
-                      {m.isFollowUp ? (
-                        <button onClick={() => sendQuickMessage(m.text)} className="text-sm text-blue-600 hover:underline">
-                          {m.text}
-                        </button>
-                      ) : (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
-                      )}
-                    </div>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown>
                     <div className={`text-xs mt-1 ${m.sender === 'user' ? 'text-blue-200 text-right' : 'text-gray-500 text-left'}`}>
-                      {m.timestamp.toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
+                      {m.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </div>
                   </div>
                 </div>
@@ -262,26 +233,38 @@ const ChatbotDemo = () => {
                 onKeyPress={handleKeyPress}
                 placeholder="Ask about public safety..."
                 disabled={isLoading}
-                className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none"
+                className="flex-1 border border-gray-300 rounded-lg px-4 py-2"
               />
               <button
                 onClick={() => handleSendMessage(inputText)}
                 disabled={!inputText.trim() || isLoading}
                 className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
-                <Send className="h-4 w-4" />
+                <Send className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 mb-3">
               {quickActions.map((qa, i) => (
                 <button
                   key={i}
                   onClick={() => sendQuickMessage(qa)}
                   disabled={isLoading}
-                  className="bg-gray-100 px-3 py-1 rounded-full text-sm text-gray-700 hover:bg-gray-200"
+                  className="bg-gray-100 px-3 py-1 rounded-full text-sm hover:bg-gray-200"
                 >
                   {qa}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => sendQuickMessage(s)}
+                  className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-sm hover:bg-blue-100"
+                >
+                  {s}
                 </button>
               ))}
             </div>
