@@ -87,8 +87,7 @@ app.post('/api/chat', async (req, res) => {
     userHistories[userId].push({ role: "user", parts: [{ text: message }] });
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
-
-    const instruction = `You are SafetyBot, a Civic Tech assistant focused on public safety.
+const instruction = `You are SafetyBot, a Civic Tech assistant focused on public safety.
 
 Only answer civic safety–related questions such as:
 - Natural disaster guidance
@@ -105,11 +104,15 @@ Assume the user is located in Indianapolis, Indiana, unless explicitly stated ot
 
 Take into account the context mode (e.g., home, workplace, child) if provided.
 
-After your main reply, think of 3 very relevant follow-up questions the user might ask next. Format your full JSON output like:
-{
-  "reply": "your actual answer",
-  "followUps": ["question1", "question2", "question3"]
-}`;
+Respond ONLY in this format only, never forget the headers:
+
+### REPLY ###
+<your actual reply in markdown (use bullet points if needed)>
+
+### FOLLOW UP ###
+<question1>#<question2>#<question3>`;
+
+;
 
     const body = {
       contents: userHistories[userId],
@@ -122,38 +125,45 @@ After your main reply, think of 3 very relevant follow-up questions the user mig
         maxOutputTokens: 300
       }
     };
+const geminiRes = await axios.post(url, body);
+const raw = geminiRes.data.candidates?.[0]?.content?.parts?.[0]?.text;
+console.log("@@@@@@@@@@@@", raw,  "@@@@@@@@@@@@@");
+if (!raw) throw new Error("No response from Gemini");
+let parsed = {
+  reply: "⚠️ Could not parse response from model.",
+  followUps: []
+};
 
-    const geminiRes = await axios.post(url, body);
-    const raw = geminiRes.data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!raw) throw new Error("No response from Gemini");
+try {
+  // Match format based on headers
+  const replyMatch = raw.match(/### REPLY ###([\s\S]*?)### FOLLOW UP ###/i);
+  const followUpMatch = raw.match(/### FOLLOW UP ###([\s\S]*)/i);
 
-    let parsed = { reply: raw, followUps: [] };
+  if (replyMatch) {
+    parsed.reply = replyMatch[1].trim();
+  }
 
-    try {
-      // Extract the JSON part
-      const match = raw.match(/{[\s\S]+?"followUps"\s*:\s*\[[\s\S]*?\]}/);
-      if (match) {
-        const json = JSON.parse(match[0]);
-        parsed.reply = json.reply || raw;
-        parsed.followUps = Array.isArray(json.followUps) ? json.followUps : [];
+  if (followUpMatch) {
+    parsed.followUps = followUpMatch[1]
+      .trim()
+      .split("#")
+      .map(q => q.trim())
+      .filter(Boolean);
+  }
+} catch (err) {
+  console.warn("⚠️ Markdown parsing failed. Using raw text only.", err.message);
+  parsed.reply = raw.trim();
+  parsed.followUps = [];
+}
 
-        // Optional: remove the JSON from the raw text if needed
-        const cleanedText = raw.replace(match[0], '').trim();
-        if (!parsed.reply.includes(cleanedText)) {
-          parsed.reply = cleanedText || parsed.reply;
-        }
-      }
-    } catch (err) {
-      console.warn("⚠️ JSON parsing failed. Using raw text only.", err.message);
-    }
+// userHistories[userId].push({ role: "model", parts: [{ text: parsed.reply }] });
 
+console.log(parsed.reply);
 
-    userHistories[userId].push({ role: "model", parts: [{ text: parsed.reply }] });
-
-    return res.json({
-      reply: parsed.reply,
-      followUps: parsed.followUps
-    });
+return res.json({
+  reply: parsed.reply,
+  followUps: parsed.followUps
+});
 
   } catch (err) {
     console.error("❌ Gemini API error:", err.response?.data || err.message);

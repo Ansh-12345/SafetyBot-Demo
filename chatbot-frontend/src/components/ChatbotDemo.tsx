@@ -68,13 +68,15 @@ const ChatbotDemo = () => {
     setSuggestions([]);
 
     try {
-      const response = await fetch('https://safetybot-demo.onrender.com/api/chat', {
+      // const response = await fetch('https://safetybot-demo.onrender.com/api/chat', {
+      const response = await fetch('http://localhost:3001/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, mode: safetyMode })
       });
 
       const data = await response.json();
+      console.log('Response:', data["reply"], data["followUps"]);
       const replyText = data.reply || 'Sorry, I couldn’t understand that.';
       const followUps: string[] = Array.isArray(data.followUps) ? data.followUps : [];
 
