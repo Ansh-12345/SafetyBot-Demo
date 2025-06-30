@@ -68,7 +68,7 @@ const ChatbotDemo = () => {
     setSuggestions([]);
 
     try {
-      const response = await fetch('https://safety-bot-demo.vercel.app/api/chat', {
+      const response = await fetch('https://safetybot-demo.onrender.com/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, mode: safetyMode })
